@@ -1,0 +1,58 @@
+from flask import Flask, render_template, request, redirect, url_for, session
+from flask_sqlalchemy import SQLAlchemy
+from werkzeug.security import generate_password_hash, check_password_hash
+
+app = Flask(__name__)
+app.config['SECRET_KEY'] = 'your_secret_key'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///star_rating.db'
+db = SQLAlchemy(app)
+
+class User(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    password = db.Column(db.String(120), nullable=False)
+    is_teacher = db.Column(db.Boolean, default=False)
+
+class Student(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False)
+    star_rating = db.Column(db.Integer, default=0)
+    parent_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+@app.route('/')
+def home():
+    return render_template('home.html')
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        user = User.query.filter_by(username=request.form['username']).first()
+        if user and check_password_hash(user.password, request.form['password']):
+            session['user_id'] = user.id
+            session['is_teacher'] = user.is_teacher
+            return redirect(url_for('dashboard'))
+    return render_template('login.html')
+
+@app.route('/dashboard')
+def dashboard():
+    if 'user_id' not in session:
+        return redirect(url_for('login'))
+    if session['is_teacher']:
+        students = Student.query.all()
+        return render_template('teacher_dashboard.html', students=students)
+    else:
+        children = Student.query.filter_by(parent_id=session['user_id']).all()
+        return render_template('parent_dashboard.html', children=children)
+
+@app.route('/rate_student/<int:student_id>', methods=['POST'])
+def rate_student(student_id):
+    if 'user_id' not in session or not session['is_teacher']:
+        return redirect(url_for('login'))
+    student = Student.query.get(student_id)
+    student.star_rating = int(request.form['rating'])
+    db.session.commit()
+    return redirect(url_for('dashboard'))
+
+if __name__ == '__main__':
+    db.create_all()
+    app.run(debug=True)
